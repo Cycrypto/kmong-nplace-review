@@ -8,7 +8,7 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import QTime, QTimer
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from nplace.crawler.worker import CrawlWorker
 from nplace.utils.nme2_origin import NaverMeConvertor
@@ -23,6 +23,7 @@ class URLManagerUI(QWidget):
         self.output_dir = "output"  # 출력 디렉터리
         self.init_ui()
         self.worker = None  # 스레드 작업자를 저장
+        self.is_crawling = False  # 크롤링 상태 플래그
         self.timer = QTimer(self)  # 스케줄링용 타이머
         self.timer.timeout.connect(self.start_crawling)  # 타이머 시간 도달 시 크롤링 시작
 
@@ -134,6 +135,12 @@ class URLManagerUI(QWidget):
         self.log_text.append(message)
 
     def start_crawling(self):
+        """크롤링을 시작합니다. 중복 실행 방지."""
+        if self.is_crawling:
+            self.log_message("이미 크롤링이 진행 중입니다.")
+            QMessageBox.warning(self, "경고", "이미 크롤링이 진행 중입니다.")
+            return
+
         if not os.path.exists(self.query_file):
             QMessageBox.critical(self, "오류", f"쿼리 파일이 없습니다: {self.query_file}")
             return
@@ -142,6 +149,8 @@ class URLManagerUI(QWidget):
             self.table.item(row, 1).text()
             for row in range(self.table.rowCount())
         ]
+        business_ids = [bid for bid in business_ids if bid != "N/A" and bid.strip() != ""]
+
         if not business_ids:
             QMessageBox.warning(self, '경고', '크롤링할 Business ID가 없습니다.')
             return
@@ -155,6 +164,7 @@ class URLManagerUI(QWidget):
         self.progress_bar.setValue(0)
         self.crawl_button.setEnabled(False)
         self.stop_button.setEnabled(True)
+        self.is_crawling = True  # 크롤링 상태 플래그 설정
 
         self.worker = CrawlWorker(business_ids, self.query_file, dated_output_dir)
         self.worker.log_signal.connect(self.log_message)
@@ -162,18 +172,53 @@ class URLManagerUI(QWidget):
         self.worker.finished_signal.connect(self.crawling_finished)
 
         self.worker.start()
+        self.log_message("크롤링을 시작합니다.")
 
     def stop_crawling(self):
-        if self.worker:
+        """크롤링을 중단합니다."""
+        if self.worker and self.is_crawling:
             self.worker.stop()
             self.worker.wait()
             self.crawling_finished()
+            self.log_message("크롤링을 중단했습니다.")
 
     def crawling_finished(self):
+        """크롤링 작업이 완료되면 호출됩니다."""
         self.progress_bar.setVisible(False)
         self.crawl_button.setEnabled(True)
         self.stop_button.setEnabled(False)
+        self.is_crawling = False  # 크롤링 상태 플래그 해제
         QMessageBox.information(self, '크롤링 완료', '크롤링이 완료되었습니다.')
+        self.log_message("크롤링이 완료되었습니다.")
+
+        # 스케줄링을 반복적으로 설정
+        if self.timer.isActive():
+            # 다음 날 같은 시간에 크롤링을 예약
+            self.schedule_next_run()
+
+    def schedule_next_run(self):
+        """다음 날 같은 시간에 크롤링을 예약합니다."""
+        scheduled_time = self.schedule_time_edit.time()
+        current_datetime = datetime.now()
+        scheduled_datetime = current_datetime.replace(
+            hour=scheduled_time.hour(),
+            minute=scheduled_time.minute(),
+            second=scheduled_time.second(),
+            microsecond=0
+        )
+
+        # 만약 설정 시간이 이미 지났다면 다음 날로 설정
+        if scheduled_datetime <= current_datetime:
+            scheduled_datetime += timedelta(days=1)
+
+        interval = (scheduled_datetime - current_datetime).total_seconds() * 1000  # 밀리초 단위
+
+        self.timer.setSingleShot(True)  # 단일 실행 설정
+        self.timer.start(int(interval))
+        self.schedule_status_label.setText(f"스케줄링 상태: {scheduled_time.toString('HH:mm:ss')}에 크롤링 시작")
+        self.schedule_button.setEnabled(False)
+        self.cancel_schedule_button.setEnabled(True)
+        self.log_message(f"다음 스케줄링 설정됨: {scheduled_datetime.strftime('%Y-%m-%d %H:%M:%S')}에 크롤링 시작")
 
     def start_scheduling(self):
         """스케줄링을 설정합니다."""
@@ -185,11 +230,24 @@ class URLManagerUI(QWidget):
             QMessageBox.warning(self, "경고", "스케줄링 시간은 현재 시간 이후로 설정해야 합니다.")
             return
 
-        self.timer.start(interval)
+        # 다음 날 같은 시간에 스케줄링을 설정하도록 변경
+        scheduled_datetime = datetime.now().replace(
+            hour=scheduled_time.hour(),
+            minute=scheduled_time.minute(),
+            second=scheduled_time.second(),
+            microsecond=0
+        )
+        if scheduled_datetime <= datetime.now():
+            scheduled_datetime += timedelta(days=1)
+
+        interval = (scheduled_datetime - datetime.now()).total_seconds() * 1000  # 밀리초 단위
+
+        self.timer.setSingleShot(True)  # 단일 실행 설정
+        self.timer.start(int(interval))
         self.schedule_status_label.setText(f"스케줄링 상태: {scheduled_time.toString('HH:mm:ss')}에 크롤링 시작")
         self.schedule_button.setEnabled(False)
         self.cancel_schedule_button.setEnabled(True)
-        self.log_message(f"스케줄링 설정됨: {scheduled_time.toString('HH:mm:ss')}에 크롤링 시작")
+        self.log_message(f"스케줄링 설정됨: {scheduled_datetime.strftime('%Y-%m-%d %H:%M:%S')}에 크롤링 시작")
 
     def cancel_scheduling(self):
         """스케줄링을 취소합니다."""
@@ -200,7 +258,7 @@ class URLManagerUI(QWidget):
         self.log_message("스케줄링이 취소되었습니다.")
 
     def closeEvent(self, event):
-        """애플리케이션 종료 시 output 디렉토리를 삭제합니다."""
+        """애플리케이션 종료 시 output 디렉터리를 삭제합니다."""
         if os.path.exists(self.output_dir):
             try:
                 shutil.rmtree(self.output_dir)  # output 디렉터리 삭제
