@@ -1,3 +1,4 @@
+import random
 import re
 
 import requests
@@ -24,6 +25,7 @@ class NaverMeConvertor:
             red_url = req.headers.get('Location')
             req = requests.get(red_url, headers=self.HEADERS, allow_redirects=False)
             origin_urls.append(req.headers.get('location'))
+            random.uniform(1.0, 3.0)
         return origin_urls
 
     def get_meta_info(self, url):

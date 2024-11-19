@@ -125,7 +125,7 @@ class CrawlWorker(QThread):
                         self.log_signal.emit(f"Fetched {len(reviews)} reviews for {business_id} on page {page}")
 
                         # 랜덤 딜레이 적용
-                        delay = random.uniform(3.0, 5.0)
+                        delay = random.uniform(1.0, 10.0)
                         for _ in range(int(delay * 10)):  # 0.1초 간격으로 체크
                             if not self._is_running:
                                 return

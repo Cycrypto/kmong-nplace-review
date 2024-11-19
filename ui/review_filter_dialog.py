@@ -2,7 +2,7 @@ import sys
 import os
 import json
 import re
-from datetime import datetime
+from datetime import datetime, date
 
 import pandas as pd
 from PyQt5.QtWidgets import (
@@ -18,6 +18,7 @@ class ReviewFilterDialog(QDialog):
         self.setWindowTitle("결과 확인 및 내보내기")
         self.output_dir = output_dir  # 저장된 JSONLines 파일 경로
         self.filtered_data = []  # 필터링된 데이터를 저장
+        self.current_filtered_data = []  # 현재 필터링된 데이터를 저장
         self.init_ui()
 
     def init_ui(self):
@@ -38,10 +39,14 @@ class ReviewFilterDialog(QDialog):
 
         # 리뷰 작성 날짜 필터링 (시작 날짜와 종료 날짜)
         write_date_filter_layout = QHBoxLayout()
+
         self.start_date_edit = QDateEdit()
         self.start_date_edit.setCalendarPopup(True)
         self.start_date_edit.setDisplayFormat("yyyy-MM-dd")
-        self.start_date_edit.setDate(QDate.currentDate().addMonths(-1))  # 기본 시작 날짜: 한 달 전
+        # 현재 월의 첫 날로 설정
+        today = date.today()
+        first_day_of_month = date(today.year, today.month, 1)
+        self.start_date_edit.setDate(QDate(first_day_of_month.year, first_day_of_month.month, first_day_of_month.day))
 
         self.end_date_edit = QDateEdit()
         self.end_date_edit.setCalendarPopup(True)
@@ -158,6 +163,7 @@ class ReviewFilterDialog(QDialog):
             reply_count = sum(1 for item in self.filtered_data if item.get("답글 내용"))
 
             self.stats_label.setText(f"리뷰 개수: {review_count}, 답글 개수: {reply_count}")
+            self.current_filtered_data = self.filtered_data.copy()  # 초기 필터링된 데이터를 현재 필터링 데이터로 설정
             self.update_table()
             self.log_message(f"{selected_crawling_date}의 데이터를 로드했습니다. 리뷰 개수: {review_count}, 답글 개수: {reply_count}")
 
@@ -181,7 +187,7 @@ class ReviewFilterDialog(QDialog):
     def update_table(self):
         """테이블 데이터를 업데이트합니다."""
         self.table.setRowCount(0)
-        for review in self.filtered_data:
+        for review in self.current_filtered_data:
             row_position = self.table.rowCount()
             self.table.insertRow(row_position)
             self.table.setItem(row_position, 0, QTableWidgetItem(review.get("업체명", "")))
@@ -215,7 +221,8 @@ class ReviewFilterDialog(QDialog):
             reply_count = sum(1 for item in filtered_reviews if item.get("답글 내용"))
 
             self.stats_label.setText(f"리뷰 개수: {review_count}, 답글 개수: {reply_count}")
-            self.update_table_with_filtered_data(filtered_reviews)
+            self.current_filtered_data = filtered_reviews  # 현재 필터링 데이터를 업데이트
+            self.update_table()
             self.log_message(
                 f"{start_date}부터 {end_date}까지 작성된 리뷰로 필터링했습니다. 리뷰 개수: {review_count}, 답글 개수: {reply_count}")
 
@@ -245,7 +252,7 @@ class ReviewFilterDialog(QDialog):
 
     def export_to_excel_in_chunks(self):
         """필터링된 업체 데이터를 청크 개수대로 나눠 엑셀 파일로 저장합니다."""
-        if not self.filtered_data:
+        if not self.current_filtered_data:
             QMessageBox.warning(self, "경고", "필터링된 데이터가 없습니다. 먼저 데이터를 로드하세요.")
             return
 
@@ -261,7 +268,8 @@ class ReviewFilterDialog(QDialog):
 
             # 고유 업체 ID 추출
             business_ids = sorted(
-                list(set([review["business_id"] for review in self.filtered_data if review.get("business_id")])))
+                list(set([review["business_id"] for review in self.current_filtered_data if review.get("business_id")]))
+            )
             total_businesses = len(business_ids)
 
             if chunk_size > total_businesses:
@@ -285,7 +293,8 @@ class ReviewFilterDialog(QDialog):
 
             # 엑셀 파일로 저장
             for idx, chunk_business_ids in enumerate(chunks, start=1):
-                chunk_data = [review for review in self.filtered_data if review["business_id"] in chunk_business_ids]
+                chunk_data = [review for review in self.current_filtered_data if
+                              review["business_id"] in chunk_business_ids]
 
                 if not chunk_data:
                     continue  # 빈 청크는 건너뜁니다.
@@ -323,6 +332,19 @@ class ReviewFilterDialog(QDialog):
                 df.to_excel(save_path, index=False, engine="openpyxl")
 
                 self.log_message(f"저장됨: {save_path}")
+
+                # 저장된 엑셀 파일 자동으로 열기 (Windows 기준)
+                try:
+                    os.startfile(save_path)
+                except AttributeError:
+                    # macOS 또는 Linux의 경우
+                    import subprocess
+                    if sys.platform == "darwin":
+                        subprocess.call(["open", save_path])
+                    else:
+                        subprocess.call(["xdg-open", save_path])
+                except Exception as e:
+                    self.log_message(f"파일을 여는 중 오류 발생: {e}")
 
             QMessageBox.information(self, "성공", f"엑셀 파일로 저장이 완료되었습니다. 총 {total_chunks}개 파일이 생성되었습니다.")
         except ValueError as ve:
