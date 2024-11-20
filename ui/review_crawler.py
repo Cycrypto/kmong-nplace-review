@@ -224,13 +224,14 @@ class URLManagerUI(QWidget):
         """스케줄링을 설정합니다."""
         scheduled_time = self.schedule_time_edit.time()
         current_time = QTime.currentTime()
-        interval = current_time.msecsTo(scheduled_time)
 
-        if interval <= 0:
-            QMessageBox.warning(self, "경고", "스케줄링 시간은 현재 시간 이후로 설정해야 합니다.")
-            return
+        # 음수 간격 체크를 제거합니다.
+        # interval = current_time.msecsTo(scheduled_time)
+        # if interval <= 0:
+        #     QMessageBox.warning(self, "경고", "스케줄링 시간은 현재 시간 이후로 설정해야 합니다.")
+        #     return
 
-        # 다음 날 같은 시간에 스케줄링을 설정하도록 변경
+        # 스케줄링 시간을 datetime 객체로 변환하고 필요시 다음 날로 조정합니다.
         scheduled_datetime = datetime.now().replace(
             hour=scheduled_time.hour(),
             minute=scheduled_time.minute(),
@@ -240,9 +241,9 @@ class URLManagerUI(QWidget):
         if scheduled_datetime <= datetime.now():
             scheduled_datetime += timedelta(days=1)
 
-        interval = (scheduled_datetime - datetime.now()).total_seconds() * 1000  # 밀리초 단위
+        interval = (scheduled_datetime - datetime.now()).total_seconds() * 1000  # 밀리초로 변환
 
-        self.timer.setSingleShot(True)  # 단일 실행 설정
+        self.timer.setSingleShot(True)
         self.timer.start(int(interval))
         self.schedule_status_label.setText(f"스케줄링 상태: {scheduled_time.toString('HH:mm:ss')}에 크롤링 시작")
         self.schedule_button.setEnabled(False)
