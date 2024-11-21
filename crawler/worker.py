@@ -5,7 +5,7 @@ import logging
 import httpx
 from PyQt5.QtCore import QThread, pyqtSignal
 
-from nplace.utils.date import normalize_date
+from nplace.utils.date import normalize_date, is_within_last_three_months
 
 
 class CrawlWorker(QThread):
@@ -121,11 +121,19 @@ class CrawlWorker(QThread):
                         reviews = data.get("data", {}).get("visitorReviews", {}).get("items", [])
                         if not reviews:
                             break  # 더 이상 리뷰가 없으면 종료
+                        # 리뷰 날짜 필터링
+                        filtered_reviews = [
+                            review for review in reviews
+                            if is_within_last_three_months(normalize_date(review.get('visited', '')))
+                        ]
+
+                        if not filtered_reviews:
+                            break  # 3개월 내 리뷰가 없으면 종료
                         self.save_reviews(reviews, business_id)
                         self.log_signal.emit(f"Fetched {len(reviews)} reviews for {business_id} on page {page}")
 
                         # 랜덤 딜레이 적용
-                        delay = random.uniform(1.0, 10.0)
+                        delay = random.uniform(3.0, 10.0)
                         for _ in range(int(delay * 10)):  # 0.1초 간격으로 체크
                             if not self._is_running:
                                 return
@@ -147,4 +155,6 @@ class CrawlWorker(QThread):
     def stop(self):
         """작업을 중단합니다."""
         self._is_running = False
+
+
 
